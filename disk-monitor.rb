@@ -15,37 +15,63 @@
 # limitations under the License.
 # 
 
+require 'optparse'
 
-$0 = 'disk-monitor ' + ARGV.join(' ')
+$script_start = Time.now
+$monitors = {}
+$select_timeout = 2
 
-require 'getoptlong'
 
-def help()
-  puts "#{__FILE__} [OPTIONS]
+###
+# Parse command line options
+###
 
-Options:
-	-h, --help 		Show this help
+$options = {
+  'pidfile'   => '/var/run/disk-monitor.pid',
+  'logfile'   => '/var/log/disk-monitor.log',
+  'fifo'      => '/var/run/disk-monitor.fifo',
+  'daemon'    => false,
+  'heartbeat' => 5,
+  'wait'      => 60
+}
 
-	-p, --pidfile		Set the pidfile
-				Default /var/run/disk-monitor.pid
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{$0} [options]"
 
-	-l, --logfile		Log to this file
-				Default: /var/log/disk-monitor.log
+  opts.on("-h", "--help", :NONE, "Shows this message") do
+    puts opts
+    exit 0
+  end
 
-	-f, --fifo		Set the fifo to listen to
-				Default: /var/run/disk-monitor.fifo
+  opts.on("-p", "--pidfile", :REQUIRED, String, "Set the pidfile. (Default: #{$options['pidfile']})") do |pidfile|
+    $options['pidfile'] = pidfile
+  end
 
-	-d, --daemonize		Daemonize
-				Default: false
+  opts.on("-l", "--logfile", :REQUIRED, String, "Set the logfile. (Default: #{$options['logfile']})") do |logfile|
+    $options['logfile'] = logfile
+  end
 
-	-b, --heartbeat		Elapsed time between heartbeats before a directory will be marked as 'down'
-				Default: 5
+  opts.on("-f", "--fifo", :REQUIRED, String, "Set the Linux FIFO file through which the reporters will report to the monitor. (Default: #{$options['fifo']})") do |fifo|
+    $options['fifo'] = fifo
+  end
 
-	-w, --wait		Seconds from start of script to wait before updating iptables
-				Default: 60
+  opts.on("-d", "--[no-]daemonize", :NONE, "Daemonize this program on startup. (Default: #{$options['daemon']})") do |daemon|
+    $options['daemon'] = daemon
+  end
 
-"
-end
+  opts.on("-b", "--heartbeat", :REQUIRED, Integer, "Set the max number of seconds to allow between heartbeats before a reporter will be marked as 'down'. (Default: #{$options['heartbeat']} seconds)") do |heartbeat|
+    $options['heartbeat'] = heartbeat
+  end
+
+  opts.on("-w", "--wait", :REQUIRED, Integer, "Set the number of seconds to delay before updating iptables. (Default: #{$options['wait']} seconds)") do |wait|
+    $options['wait'] = wait
+  end
+end.parse!
+
+
+###
+# Helper functions
+###
 
 def daemonize
   if RUBY_VERSION < "1.9"
@@ -66,21 +92,21 @@ end
 def log(message)
   full_message = "[#{Time.now}] #{message}"
   puts full_message
-  File.open($logfile, 'a') {|f| f.write("#{full_message}\n") }
+  File.open($options['logfile'], 'a') {|f| f.write("#{full_message}\n") }
 end
 
 def write_pid()
-  File.open($pidfile, 'w') {|f| f.write("#{$$}") }
-  log("wrote pid to #{$pidfile}")
+  File.open($options['pidfile'], 'w') {|f| f.write("#{$$}") }
+  log("wrote pid to #{$options['pidfile']}")
 end
 
 def clean_pid()
-  File.delete($pidfile)
-  log("removed pidfile #{$pidfile}")
+  File.delete($options['pidfile'])
+  log("removed pidfile #{$options['pidfile']}")
 end
 
 def update_iptables()
-  if Time.now < $start_update_iptables
+  if Time.now < ($script_start + $options['wait'])
     return
   end
 
@@ -110,21 +136,21 @@ def update_iptables()
 
   remove.each do |rule|
     command = "iptables -D #{rule}"
+    log(command)
     `#{command}`
-#    log(command)
   end
 
   rules.each do |rule,found|
     if !found
       command = "iptables -I #{rule}"
+      log(command)
       `#{command}`
-#      log(command)
     end
   end
 end
 
 def work_loop()
-  fifo = File.open($fifo, "r+")
+  fifo = File.open($options['fifo'], "r+")
   at_exit { fifo.close() }
 
   last_iptables_update = Time.now - 86400
@@ -159,7 +185,7 @@ def work_loop()
       end
     end
 
-    cutoff = Time.now - $heartbeat
+    cutoff = Time.now - $options['heartbeat']
     $monitors.each do |dir,data|
       up = data['heartbeat'] > cutoff
       if up != data['up']
@@ -177,74 +203,30 @@ def work_loop()
 end
 
 def create_fifo()
-  if !File.exists?(File::dirname($fifo))
-    system("/bin/mkdir", "-p", File::dirname($fifo))
+  if !File.exists?(File::dirname($options['fifo']))
+    system("/bin/mkdir", "-p", File::dirname($options['fifo']))
   end
 
-  if !File.exists?($fifo)
-    log("making fifo #{$fifo}")
-    system("/usr/bin/mkfifo", $fifo)
+  if !File.exists?($options['fifo'])
+    log("making fifo #{$options['fifo']}")
+    system("/usr/bin/mkfifo", $options['fifo'])
   else
-    log("fifo #{$fifo} already exists")
+    log("fifo #{$options['fifo']} already exists")
   end
 end
 
 
-
-
-#
+###
 # MAIN
-#
+###
 
-opts = GetoptLong.new(
-  ['--help', '-h', GetoptLong::NO_ARGUMENT],
-  ['--pidfile', '-p', GetoptLong::OPTIONAL_ARGUMENT],
-  ['--logfile', '-l', GetoptLong::OPTIONAL_ARGUMENT],
-  ['--fifo', '-f', GetoptLong::OPTIONAL_ARGUMENT],
-  ['--daemonize', '-d', GetoptLong::OPTIONAL_ARGUMENT],
-  ['--heartbeat', '-b', GetoptLong::OPTIONAL_ARGUMENT],
-  ['--wait', '-w', GetoptLong::OPTIONAL_ARGUMENT]
-)
-
-$pidfile = "/var/run/disk-monitor.pid"
-$logfile = "/var/log/disk-monitor.log"
-$fifo = "/var/run/disk-monitor.fifo"
-$monitors = {}
-$heartbeat = 5
-$select_timeout = 2
-$start_update_iptables = Time.now + 60
-daemonize = false
-run = true
-
-opts.each do |opt, arg|
-  case opt
-    when '--help'
-      help()
-      run = false
-    when '--pidfile'
-      $pidfile = arg
-    when '--logfile'
-      $logfile = arg
-    when '--fifo'
-      $fifo = arg
-    when '--daemonize'
-      daemonize = true
-    when '--heartbeat'
-      $heartbeat = arg.to_i
-    when '--wait'
-      $start_update_iptables = Time.now + arg.to_i
-  end
+if $options['daemon']
+  daemonize()
+  write_pid()
+  at_exit { clean_pid() }
 end
 
-if run
-  if daemonize
-    daemonize()
-    write_pid()
-    at_exit { clean_pid() }
-  end
-
-  create_fifo()
-  work_loop()
-end
+create_fifo()
+work_loop()
 
 
