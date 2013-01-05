@@ -162,6 +162,8 @@ def work_loop()
     if !ready.nil?
       begin
         message = ready[0][0].gets()
+        log("Received: #{message}")
+
         split = message.strip.split(',')
         dir = split[0]
         ports = split[1..-1].map {|port| port.to_i}

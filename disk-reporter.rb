@@ -121,6 +121,7 @@ def work_loop()
     begin
       FileUtils.touch(touchfile)
       File.open($options['fifo'], 'a') {|f| f.write("#{message}\n") }
+      log("Sent: #{message}")
     rescue Errno::ENOENT => error
       log("[ERROR] #{error}")
     end
