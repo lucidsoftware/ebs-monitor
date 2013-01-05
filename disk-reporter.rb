@@ -62,8 +62,8 @@ OptionParser.new do |opts|
     $options['monitor'] = dir
   end
 
-  opts.on("-p", "--ports", :REQUIRED, String, "Ports to close if directory is not responsive.") do |ports|
-    $options['ports'] = ports
+  opts.on("-P", "--ports", :REQUIRED, String, "Ports to close if directory is not responsive.") do |ports|
+    $options['ports'] = ports.split(",")
   end
 
   opts.on("-s", "--sleep", :REQUIRED, Integer, "Set the number of seconds to sleep between each touch/report cycle. (Default: #{$options['sleep']} seconds)") do |sleep|
