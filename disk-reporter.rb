@@ -59,7 +59,7 @@ OptionParser.new do |opts|
   end
 
   opts.on("-m", "--monitor", :REQUIRED, String, "Directory to monitor.") do |dir|
-    $options['monitor'] = dir
+    $options['monitor'] = File.expand_path(dir)
   end
 
   opts.on("-P", "--ports", :REQUIRED, String, "Ports to close if directory is not responsive.") do |ports|
